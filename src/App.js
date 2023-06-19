@@ -12,7 +12,6 @@ import Information from './pages/Information';
 
 function App() {
 
-
   return (
     <div className="App">
       <Toaster />

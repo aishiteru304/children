@@ -4,8 +4,15 @@ import { BiShow, BiHide } from 'react-icons/bi'
 import { toast } from 'react-hot-toast'
 import axios from 'axios'
 import avatarGif from '../asset/login-animation.gif'
+import parentLogo from '../asset/parent-logo.png'
+import forge from 'node-forge';
+import { decryptAES } from '../utility/decryptAES'
+import bigInt from "big-integer";
 
-const SERVER_URL = 'http://localhost:8080'
+
+// const SERVER_URL = 'http://localhost:8080'
+let isProcess = true
+
 export default function Login() {
 
     const [showPassword, setShowPassword] = useState(false)
@@ -61,55 +68,76 @@ export default function Login() {
 
     // Phần đăng nhập bằng main website
     const handleMainLogin = () => {
-        const usernameCookies = document.cookie.split(';').filter(cookie => cookie.trim().startsWith('token='));
-        if (usernameCookies.length === 0) {
 
-            const popup = window.open(`${SERVER_URL}/login-popup`, 'Login');
-            const timer = setInterval(() => {
-                if (popup.closed) {
-                    clearInterval(timer);
-                }
-            }, 500);
-        }
-        else {
-            const token = usernameCookies[0].split("token=")[1]
-            axios.get(`${SERVER_URL}/user-info`, { headers: { Authorization: `Bearer ${token}` } })
-                .then(res => {
-                    sessionStorage.setItem('user', JSON.stringify(res.data.info))
-                    toast('Login success.')
-                    setTimeout(() => {
-                        window.location.href = '/'
-                    }, 1000)
-                })
-                .catch()
-        }
+        axios.get('http://localhost:8080/getMainKey')
+            .then(res => {
+                const mainKey = bigInt(res.data.key)
+                const bigPrime = bigInt(res.data.prime)
+                const privateKey = bigInt(process.env.REACT_APP_PRIVATE_KEY)
 
+                const sharedKey = mainKey.modPow(privateKey, bigPrime);
+                sessionStorage.setItem('sharedKey', sharedKey.value)
+            })
+            .catch()
 
+        // const width = 500;
+        // const height = 600;
+        // const left = window.screen.width / 2 - width / 2;
+        // const top = window.screen.height / 2 - height / 2;
 
+        // const popup = window.open('http://localhost:3000/auth', 'Login', `width=${width}, height=${height}, left=${left}, top=${top}`);
+
+        const popup = window.open(`http://localhost:3000/auth`, 'Login');
+        const timer = setInterval(() => {
+            if (popup.closed) {
+                clearInterval(timer);
+            }
+        }, 500);
 
     };
 
     // Lắng nghe sự kiện message từ cửa sổ popup
     window.addEventListener('message', (event) => {
-        if (event.origin !== `${SERVER_URL}`) {
+        if (event.origin !== `http://localhost:3000`) {
             return;
         }
 
-        // Xử lý token nhận được từ cửa sổ popup
-        if (event.data) {
-            axios.get(`${SERVER_URL}/user-info`, { headers: { Authorization: `Bearer ${event.data.token}` } })
-                .then(res => {
-                    if (res.data.info.name) {
-                        sessionStorage.setItem('user', JSON.stringify(res.data.info))
-                        document.cookie = `token=${event.data.token}; path=/`
+        if (isProcess) {
+            isProcess = false
+            // Xử lý token nhận được từ cửa sổ popup
+            if (event.data === 'null') {
+                toast("Tài khoản chưa đăng kí SmartSec")
+            }
+            else if (event.data) {
+                const sharedKey = sessionStorage.getItem('sharedKey')
+
+                if (sharedKey) {
+                    const dataJson = JSON.parse(decryptAES(event.data, sharedKey))
+                    const { name, sex, birth, phone, email, signature } = dataJson
+
+                    // Xác thực chữ kí số 
+                    const publicKey = forge.pki.publicKeyFromPem(process.env.REACT_APP_PUBLIC_KEY_SIGNATURE);
+                    const md2 = forge.md.sha256.create();
+                    md2.update(name + sex + birth + phone + email, 'utf8');
+                    const verified = publicKey.verify(md2.digest().bytes(), signature);
+
+                    if (verified) {
+                        sessionStorage.setItem('user', JSON.stringify(dataJson))
+                        toast('Login success.')
                         setTimeout(() => {
                             window.location.href = '/'
                         }, 1000)
                     }
+                    else toast("Xác thực chữ kí không thành công")
+                }
+            }
 
-                })
-                .catch()
+            setTimeout(() => {
+                isProcess = true
+            }, 1000)
         }
+
+
     });
 
 
@@ -157,8 +185,8 @@ export default function Login() {
                     </button>
 
                     <div className='h-10 flex bg-slate-200 rounded-md px-4 items-center cursor-pointer mt-4' onClick={handleMainLogin}>
-                        <img className='w-8 h-8 rounded-full mr-10' src={avatarGif} alt='' />
-                        <span className='h-full leading-10'>Continue with My App</span>
+                        <img className='w-9 h-8 rounded-full mr-10' src={parentLogo} alt='' />
+                        <span className='h-full leading-10'>Continue with SmartSec</span>
                     </div>
 
                     <p className="text-left text-sm mt-3">
